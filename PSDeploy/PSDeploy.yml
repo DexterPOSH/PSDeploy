@@ -59,6 +59,10 @@ PSGalleryScript:
   Script: PSGalleryScript.ps1
   Description: EXPERIMENTAL... Deploys a PowerShell script to a repository like the PowerShell Gallery.  WARNING- this modifies the scripts you want to deploy
 
+ScheduledTask:
+  Script: ScheduledTask.ps1
+  Description: Deploys a ScheduledTask to a computer, using CIM/WMI.
+
 Task:
   Script: Task.ps1
   Description: Support deployments by handling simple tasks.
