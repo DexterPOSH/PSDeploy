@@ -215,7 +215,25 @@
 
                 # First, get the script, parse out parameters, restrict splatting to valid params
                 $DeploymentScript = $DeploymentScripts.$Type
-                $ValidParameters = Get-ParameterName -Command $DeploymentScript
+                
+                # Below has to be changed to factor in different paramete sets
+                $ScriptInfo = Get-Command -Name $DeploymentScript
+                $ScriptParameterSetsName = @($ScriptInfo.ParameterSets.Name)
+
+                # get the valid parameters based on the parameters specified within the WithOptions block
+                if (($ScriptParameterSetsName.Count -eq 1) -and
+                ($ScriptParameterSetsName -contains '__AllParameterSets')) 
+                {
+                    # this infers that no parameter sets
+                    $ValidParameters = Get-ParameterName -Command $DeploymentScript
+                }
+                else
+                {
+                    # Parameter sets defined, now figure out which parameter set is used.
+                    $ParameterSetUsed = Get-ParameterSetinUse -ScriptInfo $ScriptInfo -ParameterHash $Deployment.DeploymentOptions
+                    $ValidParameters = Get-ParameterName -command $DeploymentScript -parameterset $ParameterSetUsed
+                }
+                
 
                 $FilteredOptions = @{}
                 foreach($key in $Deployment.DeploymentOptions.Keys)
