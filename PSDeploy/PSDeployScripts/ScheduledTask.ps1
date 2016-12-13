@@ -54,7 +54,7 @@ param(
     [Parameter(ParameterSetName='TaskWithPrincipalStartup')]
     [Parameter(ParameterSetName='TaskWithPrincipallogon')]
     [ValidateSet('None','Password','S4U','Interactive','Group','ServiceAccount','Interactive or Password')]
-    [String]$LogonType,
+    [String]$LogonType='None',
 
     [Parameter(ParameterSetName='TaskWithPrincipalOnce')]
     [Parameter(ParameterSetName='TaskTriggerOnce')]
@@ -69,7 +69,6 @@ param(
     [Alias('StartTime')]
     [DateTime]$At,
 
-    [Parameter(ParameterSetName='TaskWithPrincipal')]
     [Parameter(ParameterSetName='TaskTriggerOnce')]
     [Parameter(ParameterSetName='TaskTriggerDaily')]
     [Parameter(ParameterSetName='TaskTriggerWeekly')]
@@ -96,7 +95,7 @@ param(
 
     [Parameter(ParameterSetName='TaskWithPrincipalWeekly')]
     [Parameter(ParameterSetName='TaskTriggerWeekly')]
-    [string[]]$DaysOfWeek,
+    [System.DayOfWeek[]]$DaysOfWeek,
 
     [Parameter(ParameterSetName='TaskWithPrincipalWeekly')]
     [Parameter(ParameterSetName='TaskTriggerWeekly')]
@@ -111,13 +110,68 @@ param(
     [Switch]$AtLogon
 
 )
+[void]$PSBoundParameters.Remove('Deployment')
+if (Get-Module -Name ScheduledTasks -ListAvailable) 
+{
+    Write-Verbose -message 'ScheduledTasks PowerShell module found.'
+}
+else 
+{
+    # TO DO add support usig schtasks.exe for backwards compatibility
+    throw "ScheduledTasks PowerShell module NOT found. Deployment will exit. Requires Windows Server 2012 or Windows 8 and above on $env:COMPUTERNAME "
+}
+
+# Remove the above parameters from the PSBoundParameters
+[Void]$PSBoundParameters.Remove('Credential')
+[Void]$PSBoundParameters.Remove('ComputerName')
+[Void]$PSBoundParameters.Remove('Deployment')
+[Void]$PSBoundParameters.Remove('TaskAction')
+[Void]$PSBoundParameters.Remove('TaskName')
 
 foreach($Deploy in $Deployment)
 {
-    Do-SomethingWith $Deploy.DeploymentName
-    Do-SomethingElseWith $Deploy.Source
-    foreach($Target in $Deploy.Targets)
+    try 
     {
-        Deliver-SomethingTo $Target -From $Deploy.Source
+        # open a new CIM session
+        $CIMSession = New-CIMSession -ComputerName $ComputerName -Credential $Credential -ErrorAction Stop
+        $SchedTaskParamHash = @{
+            CimSession = $CIMSession
+        }
+
+        # Create Task Princial (if required)
+        if ($PSCmdlet.ParameterSetName -like "TaskWithPrincipal*") {
+            # Create the task Princial
+            $TaskPrincipal = New-ScheduledTaskPrincipal  -UserID $RunAsUser -RunLevel $RunLevel -LogonType $LogonType -ErrorAction Stop
+            $SchedTaskParamHash.Add('Prinicipal',$TaskPrincipal)
+        }
+
+        # Create Task Trigger
+        $TaskTrigger = New-ScheduledTaskTrigger @PSBoundParameters -CimSession $CIMSession -ErrorAction Stop
+        $SchedTaskParamHash.Add('Trigger',$TaskTrigger)
+
+        # Create Task actions
+        # split the TaskAction passed on a whitespace, if there are arguments passed then use them
+        $Executable, $Argument = $TaskAction -split ' ',2
+        if (-not [String]::IsNullOrEmpty($Argument)) 
+        {
+            $TaskAction = New-ScheduledTaskAction -Execute $Executable -Argument $Argument -CimSession $CIMSession -ErrorAction Stop
+        }
+        else
+        {
+            $TaskAction = New-ScheduledTaskAction -Execute $Executable -CimSession $CIMSession -ErrorAction Stop
+        }
+        $SchedTaskParamHash.Add('Action', $TaskAction)
+
+        # Create the Scheduled task
+        $SchedTask = New-ScheduledTask @SchedTaskParamHash -ErrorAction Stop
+
+        # Register the Scheduled task on the remote node
+        Register-ScheduledTask -InputObject $SchedTask -TaskName $TaskName -ErrorAction Stop 
     }
+    catch
+    {
+        Write-Warning -Message "[ScheduledTask] deployment failed for deployment ->  $($Deploy | Out-String)"
+        #$PSCmdlet.ThrowTerminatingError($PSItem)
+    }
+
 }
